@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+dist/
+build/
+.env
+**/.env
+/backend/.secrets/
+*.log
+.DS_Store
+Thumbs.db
+*.zip
+.credit-card-platform-share.zip
+.vscode/
+.idea/
+backend/generated/
+**/.agents/
+/backend/src/data/*.tsv

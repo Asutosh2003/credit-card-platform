@@ -1,0 +1,9 @@
+{
+  "watch": ["src"],
+  "ext": "js,json",
+  "ignore": ["scripts/*", "node_modules/*", ".env"],
+  "delay": 1200,
+  "signal": "SIGTERM",
+  "legacyWatch": true,
+  "exec": "node scripts/dev-start.js"
+}

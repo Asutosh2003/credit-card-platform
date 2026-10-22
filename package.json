@@ -1,0 +1,21 @@
+{
+  "name": "credit-card-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Wisibility Loan Hub — IdentitySphere target app",
+  "scripts": {
+    "postinstall": "npm install --prefix backend && npm run db:generate --prefix backend && npm install --prefix frontend",
+    "dev": "concurrently --kill-others --handle-input -n backend,frontend -c teal,cyan \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "stop": "npm run stop --prefix backend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "start": "npm run start --prefix backend",
+    "build": "npm run build --prefix frontend",
+    "db:push": "npm run db:push --prefix backend",
+    "db:seed": "npm run db:seed --prefix backend",
+    "pack:share": "powershell -ExecutionPolicy Bypass -File scripts/pack-share.ps1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

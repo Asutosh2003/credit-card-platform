@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                  String       @id @default(uuid())
+  userId              String       @unique @map("user_id")
+  passwordHash        String       @map("password_hash")
+  attributes          Json         @default("{}")
+  /** Denormalized loan entitlement codes assigned to this user (synced from user_roles) */
+  loanhubRoles        Json         @default("[]") @map("loanhub_roles")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  isSystemAdmin       Boolean      @default(false) @map("is_system_admin")
+  resetTokenExpiresAt DateTime?    @map("reset_token_expires_at")
+  resetTokenHash      String?      @map("reset_token_hash")
+  status              String       @default("active")
+  auditEvents         AuditEvent[] @relation("AuditActor")
+  userRoles           UserRole[]
+
+  @@map("users")
+}
+
+model Role {
+  id         String     @id @default(uuid())
+  name       String
+  code       String     @unique
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  attributes Json       @default("{}")
+  userRoles  UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid())
+  actorUserId String?  @map("actor_user_id")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  details     Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@map("audit_events")
+}
+
+model SchemaField {
+  id           String   @id @default(uuid())
+  entityType   String   @map("entity_type")
+  columnName   String   @map("column_name")
+  displayName  String   @map("display_name")
+  dataType     String   @map("data_type")
+  length       Int?
+  required     Boolean  @default(false)
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  isPrimaryKey Boolean  @default(false) @map("is_primary_key")
+  isAuto       Boolean  @default(false) @map("is_auto")
+  options      Json     @default("[]")
+
+  @@unique([entityType, columnName])
+  @@map("schema_fields")
+}
+
+/** A consumer (e.g. IdentitySphere site) that pulls data via REST connector / API key. */
+model ConnectorSite {
+  id             String               @id @default(uuid())
+  /** Display name of the connected site / connector consumer */
+  name           String               @default("IdentitySphere Connector")
+  /** API key prefix used to identify this connection */
+  keyPrefix      String               @unique @map("key_prefix")
+  ownerUserId    String?              @map("owner_user_id")
+  totalBytesSent BigInt               @default(0) @map("total_bytes_sent")
+  totalRequests  Int                  @default(0) @map("total_requests")
+  firstSeenAt    DateTime             @default(now()) @map("first_seen_at")
+  lastSeenAt     DateTime             @default(now()) @map("last_seen_at")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+  accessEvents   ConnectorAccessEvent[]
+
+  @@map("connector_sites")
+}
+
+/** Individual API-key request that sent data out to a connector. */
+model ConnectorAccessEvent {
+  id          String        @id @default(uuid())
+  siteId      String        @map("site_id")
+  method      String
+  path        String
+  statusCode  Int           @map("status_code")
+  bytesOut    Int           @default(0) @map("bytes_out")
+  recordCount Int?          @map("record_count")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  site        ConnectorSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("connector_access_events")
+}
+
+/** IdentitySphere joiner provision awaiting admin approval. */
+model ProvisionRequest {
+  id                String    @id @default(uuid())
+  status            String    @default("pending")
+  targetUserLogin   String    @map("target_user_login")
+  payload           Json
+  rawPayload        Json      @default("{}") @map("raw_payload")
+  appliedResult     Json      @default("{}") @map("applied_result")
+  rejectMessage     String?   @map("reject_message")
+  createdUserId     String?   @map("created_user_id")
+  requestedByUserId String?   @map("requested_by_user_id")
+  reviewedByUserId  String?   @map("reviewed_by_user_id")
+  reviewedAt        DateTime? @map("reviewed_at")
+  source            String    @default("identitysphere")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([targetUserLogin, status])
+  @@map("provision_requests")
+}

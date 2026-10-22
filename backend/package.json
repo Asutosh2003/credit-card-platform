@@ -1,0 +1,41 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Wisibility Loan Hub API for IdentitySphere target app",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon --config nodemon.json",
+    "start": "node src/index.js",
+    "stop": "node scripts/stop-port.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:baseline": "prisma migrate resolve --applied 20260908000000_baseline",
+    "db:push": "prisma db push",
+    "db:seed": "node src/seed.js",
+    "db:seed:named": "node src/seedNamedUsers.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.0",
+    "prisma": "^7.9.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/pg": "^8.15.5",
+    "nodemon": "^3.1.14"
+  }
+}

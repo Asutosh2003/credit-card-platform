@@ -1,0 +1,1 @@
+ALTER TABLE "users" RENAME COLUMN "lendinghub_roles" TO "loanhub_roles";
