@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { prisma } = require("../prisma");
 const { userInclude } = require("../services/helpers");
@@ -5,7 +6,19 @@ const { isApiKeyToken, findUserByApiKey } = require("../services/apiKeys");
 const {
   isBearerTokenToken,
   matchesBearerToken,
+  getEnvBearerToken,
 } = require("../services/bearerToken");
+const { cacheGet, cacheSet } = require("../services/authCache");
+
+/** HRMS-style static bearer: no DB round-trip (survives Supabase blips during bulk). */
+const CONNECTOR_PRINCIPAL = Object.freeze({
+  id: null,
+  userId: "identitysphere-connector",
+  status: "active",
+  isSystemAdmin: true,
+  passwordHash: null,
+  attributes: { display_name: "IdentitySphere Connector" },
+});
 
 const JWT_EXPIRES_IN =
   process.env.JWT_EXPIRES_IN ||
@@ -60,27 +73,58 @@ function authFailure(res, err) {
   });
 }
 
+function credentialCacheKey(kind, raw) {
+  const digest = crypto.createHash("sha256").update(String(raw)).digest("hex").slice(0, 24);
+  return `auth:${kind}:${digest}`;
+}
+
 async function authenticateWithApiKey(rawKey) {
+  const key = credentialCacheKey("api", rawKey);
+  const cached = cacheGet(key);
+  if (cached !== undefined) return cached;
+
   const user = await findUserByApiKey(rawKey, leanUserSelect);
-  if (!user || user.status === "disabled") return null;
-  return user;
+  const resolved = !user || user.status === "disabled" ? null : user;
+  return cacheSet(key, resolved);
 }
 
 async function authenticateWithBearerToken(token) {
-  if (!(await matchesBearerToken(token))) return null;
-  return prisma.user.findFirst({
-    where: { isSystemAdmin: true, status: "active" },
-    orderBy: { userId: "asc" },
-    select: leanUserSelect,
-  });
+  const envToken = getEnvBearerToken();
+  // Preferred path (Wisbility HRMS pattern): static env bearer, no DB.
+  if (envToken && token === envToken) {
+    return CONNECTOR_PRINCIPAL;
+  }
+
+  const key = credentialCacheKey("bearer", token);
+  const cached = cacheGet(key);
+  if (cached !== undefined) return cached;
+
+  if (!(await matchesBearerToken(token))) {
+    return cacheSet(key, null);
+  }
+  // Legacy file-token path removed; env mismatch already handled above.
+  return cacheSet(key, null);
 }
 
-/** Fast auth: API key or JWT + lean user row (no roles join). */
+/** Fast auth: static bearer (preferred), legacy API key, or session JWT. */
 async function authenticate(req, res, next) {
   try {
     const token = getToken(req);
     if (!token) {
       return res.status(401).json({ error: "Authentication required", code: "NO_TOKEN" });
+    }
+
+    // Static API_BEARER_TOKEN first — same model as Wisbility HRMS.
+    const envToken = getEnvBearerToken();
+    if (envToken && token === envToken) {
+      req.user = CONNECTOR_PRINCIPAL;
+      req.auth = {
+        sub: null,
+        userId: CONNECTOR_PRINCIPAL.userId,
+        isSystemAdmin: true,
+        via: "bearer_token",
+      };
+      return next();
     }
 
     if (isBearerTokenToken(token) || isApiKeyToken(token)) {
@@ -90,7 +134,9 @@ async function authenticate(req, res, next) {
         : await authenticateWithApiKey(token);
       if (!user) {
         return res.status(401).json({
-          error: isBearerToken ? "Invalid bearer token" : "Invalid API key",
+          error: isBearerToken
+            ? "Invalid bearer token — set API_BEARER_TOKEN in backend/.env"
+            : "Invalid API key — prefer API_BEARER_TOKEN (HRMS-style static bearer)",
           code: isBearerToken ? "BEARER_TOKEN_INVALID" : "API_KEY_INVALID",
         });
       }

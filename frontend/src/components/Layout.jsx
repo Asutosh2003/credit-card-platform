@@ -6,6 +6,7 @@ import {
   ScrollText,
   Settings2,
   Shield,
+  SlidersHorizontal,
   UserCircle2,
   Users,
 } from 'lucide-react';
@@ -21,6 +22,7 @@ const NAV = [
   { to: '/connectors', label: 'Connectors', icon: Cable, admin: true },
   { to: '/provision', label: 'Provision', icon: ClipboardList, admin: true },
   { to: '/audit', label: 'Audit', icon: ScrollText, admin: true },
+  { to: '/settings', label: 'Settings', icon: SlidersHorizontal, admin: true },
   { to: '/profile', label: 'My Profile', icon: UserCircle2, admin: false },
 ];
 
