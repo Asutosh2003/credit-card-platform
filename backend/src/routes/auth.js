@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { prisma } = require("../prisma");
 const { authenticate, signToken, getToken, JWT_EXPIRES_IN, JWT_COOKIE_MAX_AGE, requireAdmin } = require("../middleware/auth");
+const { invalidateAuthCache } = require("../services/authCache");
 const {
   generateApiKey,
   encryptApiKey,
@@ -12,10 +13,7 @@ const {
   saveApiKeyOnUser,
   clearApiKeyOnUser,
 } = require("../services/apiKeys");
-const {
-  readBearerToken,
-  generateBearerToken,
-} = require("../services/bearerToken");
+const { readBearerToken } = require("../services/bearerToken");
 const { findUserByLoginIdentifier } = require("../services/loginLookup");
 const { publicUser, userInclude, writeAudit } = require("../services/helpers");
 const {
@@ -358,6 +356,7 @@ router.post("/api-key", authenticate, requireAdmin, async (req, res) => {
     const { raw, prefix, hash } = generateApiKey();
     const encrypted = encryptApiKey(raw);
     await saveApiKeyOnUser(req.user.id, { hash, prefix, encrypted });
+    invalidateAuthCache();
     writeAudit({
       actorUserId: req.user.id,
       action: "generate_api_key",
@@ -380,6 +379,7 @@ router.post("/api-key", authenticate, requireAdmin, async (req, res) => {
 router.delete("/api-key", authenticate, requireAdmin, async (req, res) => {
   try {
     await clearApiKeyOnUser(req.user.id);
+    invalidateAuthCache();
     writeAudit({
       actorUserId: req.user.id,
       action: "revoke_api_key",
@@ -393,14 +393,18 @@ router.delete("/api-key", authenticate, requireAdmin, async (req, res) => {
   }
 });
 
-/** Persistent bearer token stored outside the database so reseeding won't invalidate it. */
+/** Static connector bearer — read from API_BEARER_TOKEN (Wisbility HRMS pattern). */
 router.get("/bearer-token", authenticate, requireAdmin, async (req, res) => {
   try {
     const token = await readBearerToken();
     return res.json({
       configured: Boolean(token),
-      token,
-      prefix: token ? token.slice(0, 16) : null,
+      token: process.env.NODE_ENV === "production" ? undefined : token,
+      prefix: token ? `${String(token).slice(0, 12)}…` : null,
+      source: "API_BEARER_TOKEN",
+      message: token
+        ? "Static bearer from backend/.env"
+        : "Set API_BEARER_TOKEN in backend/.env and restart",
     });
   } catch (err) {
     console.error("load bearer token error", err);
@@ -409,23 +413,11 @@ router.get("/bearer-token", authenticate, requireAdmin, async (req, res) => {
 });
 
 router.post("/bearer-token", authenticate, requireAdmin, async (req, res) => {
-  try {
-    const token = await generateBearerToken();
-    writeAudit({
-      actorUserId: req.user.id,
-      action: "generate_bearer_token",
-      entityType: "user",
-      entityId: req.user.id,
-    });
-    return res.status(201).json({
-      configured: true,
-      token,
-      prefix: token.slice(0, 16),
-    });
-  } catch (err) {
-    console.error("generate bearer token error", err);
-    return res.status(500).json({ error: "Failed to generate bearer token" });
-  }
+  return res.status(400).json({
+    error:
+      "Static bearer only. Set API_BEARER_TOKEN in backend/.env (Wisbility HRMS pattern) and restart. Do not generate or regenerate connector tokens.",
+    code: "STATIC_BEARER_ONLY",
+  });
 });
 
 module.exports = router;

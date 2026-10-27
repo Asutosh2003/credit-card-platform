@@ -15,6 +15,7 @@ import AuditPage from './pages/AuditPage';
 import ConnectorsPage from './pages/ConnectorsPage';
 import ProvisionRequestsPage from './pages/ProvisionRequestsPage';
 import ProfilePage from './pages/ProfilePage';
+import SettingsPage from './pages/SettingsPage';
 
 function Protected({ children, adminOnly = false }) {
   const { user, loading } = useAuth();
@@ -127,6 +128,14 @@ export default function App() {
           element={
             <Protected adminOnly>
               <AuditPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <Protected adminOnly>
+              <SettingsPage />
             </Protected>
           }
         />

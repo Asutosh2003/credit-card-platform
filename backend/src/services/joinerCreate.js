@@ -14,13 +14,16 @@ const { invalidateCache } = require("./cache");
  * @param {object} data - output of applyUserPayload (passwordHash, userId, attributes, status)
  */
 async function createUserFromJoiner(joiner, data) {
+  const wantsRoles = Array.isArray(joiner.roleCodes) && joiner.roleCodes.length > 0;
+
+  // Fast path: one insert, no role join / no follow-up SELECT (bulk Joiners).
   const user = await prisma.user.create({
     data,
-    include: userInclude,
+    ...(wantsRoles ? { include: userInclude } : {}),
   });
 
   let missingRoleCodes = [];
-  if (joiner.roleCodes?.length) {
+  if (wantsRoles) {
     const roles = await prisma.role.findMany({
       where: { code: { in: joiner.roleCodes } },
       select: { id: true, code: true },
@@ -33,17 +36,25 @@ async function createUserFromJoiner(joiner, data) {
         skipDuplicates: true,
       });
       await syncLoanhubRoles(user.id);
+      const refreshed = await prisma.user.findUnique({
+        where: { id: user.id },
+        include: userInclude,
+      });
+      invalidateCache("dashboard:");
+      return {
+        user: refreshed || user,
+        missingRoleCodes,
+      };
     }
   }
 
-  const refreshed = await prisma.user.findUnique({
-    where: { id: user.id },
-    include: userInclude,
-  });
+  // Shape matches publicUser() without an extra round-trip.
+  if (!user.userRoles) user.userRoles = [];
+  if (!user.loanhubRoles) user.loanhubRoles = [];
 
   invalidateCache("dashboard:");
   return {
-    user: refreshed || user,
+    user,
     missingRoleCodes,
   };
 }

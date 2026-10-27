@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, getToken, setToken } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import PasswordInput from '../components/PasswordInput';
@@ -15,16 +16,6 @@ export default function ProfilePage() {
   const [tokenMsg, setTokenMsg] = useState('');
   const [tokenErr, setTokenErr] = useState('');
   const [tokenBusy, setTokenBusy] = useState(false);
-  const [apiKeyMeta, setApiKeyMeta] = useState({ configured: false, prefix: null, createdAt: null });
-  const [apiKeyValue, setApiKeyValue] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [apiKeyMsg, setApiKeyMsg] = useState('');
-  const [apiKeyErr, setApiKeyErr] = useState('');
-  const [apiKeyBusy, setApiKeyBusy] = useState(false);
-  const [bearerToken, setBearerToken] = useState('');
-  const [bearerTokenErr, setBearerTokenErr] = useState('');
-  const [bearerTokenMsg, setBearerTokenMsg] = useState('');
-  const [bearerTokenBusy, setBearerTokenBusy] = useState(false);
 
   useEffect(() => {
     api
@@ -35,53 +26,6 @@ export default function ProfilePage() {
 
   useEffect(() => {
     setApiToken(getToken() || '');
-  }, [user]);
-
-  useEffect(() => {
-    if (!user?.isSystemAdmin) return undefined;
-    let cancelled = false;
-    api
-      .get('/api/auth/api-key')
-      .then((data) => {
-        if (!cancelled) {
-          setApiKeyMeta({
-            configured: Boolean(data.configured),
-            prefix: data.prefix || null,
-            createdAt: data.createdAt || null,
-          });
-          if (data.apiKey) {
-            setApiKeyValue(data.apiKey);
-            setShowApiKey(false);
-          } else {
-            setApiKeyValue('');
-            setShowApiKey(false);
-          }
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setApiKeyErr(err.message || 'Could not load API key.');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  useEffect(() => {
-    if (!user?.isSystemAdmin) return undefined;
-    let cancelled = false;
-    api
-      .get('/api/auth/bearer-token')
-      .then((data) => {
-        if (!cancelled) setBearerToken(data.token || '');
-      })
-      .catch((err) => {
-        if (!cancelled) setBearerTokenErr(err.message || 'Could not load bearer token.');
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [user]);
 
   const changePassword = async (e) => {
@@ -102,17 +46,15 @@ export default function ProfilePage() {
   const copyToken = async () => {
     setTokenErr('');
     setTokenMsg('');
-    const value = apiToken || getToken() || '';
-    if (!value) {
-      setTokenErr('No token available. Sign in again.');
+    if (!apiToken) {
+      setTokenErr('No session token.');
       return;
     }
     try {
-      await navigator.clipboard.writeText(value);
-      setTokenMsg('Token copied. Paste it into the IdentitySphere Bearer token field.');
+      await navigator.clipboard.writeText(apiToken);
+      setTokenMsg('Session token copied (UI login only — not for IdentitySphere).');
     } catch {
-      setTokenErr('Clipboard blocked — select the token and copy manually (Ctrl+C).');
-      setShowToken(true);
+      setTokenErr('Clipboard unavailable');
     }
   };
 
@@ -122,126 +64,15 @@ export default function ProfilePage() {
     setTokenMsg('');
     try {
       const data = await api.post('/api/auth/refresh', {});
-      if (data?.token) {
+      if (data.token) {
         setToken(data.token);
         setApiToken(data.token);
-        setTokenMsg(
-          `New token issued (expires in ${data.expiresIn || 'session'}). Copy it again for IdentitySphere.`
-        );
-      } else {
-        setTokenErr('Refresh did not return a token.');
+        setTokenMsg('Session refreshed.');
       }
-      await refresh();
     } catch (err) {
-      setTokenErr(err.message || 'Could not refresh token.');
+      setTokenErr(err.message || 'Refresh failed');
     } finally {
       setTokenBusy(false);
-    }
-  };
-
-  const generateApiKey = async () => {
-    setApiKeyBusy(true);
-    setApiKeyErr('');
-    setApiKeyMsg('');
-    try {
-      const data = await api.post('/api/auth/api-key', {});
-      setApiKeyValue(data.apiKey || '');
-      setShowApiKey(true);
-      setApiKeyMeta({
-        configured: true,
-        prefix: data.prefix || null,
-        createdAt: new Date().toISOString(),
-      });
-      setApiKeyMsg(data.message || 'API key generated. You can copy or show it anytime.');
-    } catch (err) {
-      setApiKeyErr(err.message || 'Could not generate API key.');
-    } finally {
-      setApiKeyBusy(false);
-    }
-  };
-
-  const copyApiKey = async () => {
-    setApiKeyErr('');
-    setApiKeyMsg('');
-    if (!apiKeyValue) {
-      setApiKeyErr(
-        apiKeyMeta.configured
-          ? 'This older API key cannot be recovered. Regenerate it to store a value you can show or copy later.'
-          : 'Generate an API key first, then copy it.'
-      );
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(apiKeyValue);
-      setApiKeyMsg('API key copied. Paste it into the IdentitySphere Bearer token field.');
-    } catch {
-      setApiKeyErr('Clipboard blocked — select the key and copy manually (Ctrl+C).');
-      setShowApiKey(true);
-    }
-  };
-
-  const toggleShowApiKey = () => {
-    setApiKeyErr('');
-    setApiKeyMsg('');
-    if (!apiKeyValue) {
-      setShowApiKey(false);
-      setApiKeyErr(
-        apiKeyMeta.configured
-          ? 'This older API key cannot be recovered. Regenerate it to store a value you can show or copy later.'
-          : 'Generate an API key first, then show it here.'
-      );
-      return;
-    }
-    setShowApiKey((visible) => !visible);
-  };
-
-  const revokeApiKey = async () => {
-    if (!window.confirm('Revoke the current API key? IdentitySphere will stop working until you generate a new one.')) {
-      return;
-    }
-    setApiKeyBusy(true);
-    setApiKeyErr('');
-    setApiKeyMsg('');
-    try {
-      await api.del('/api/auth/api-key');
-      setApiKeyValue('');
-      setShowApiKey(false);
-      setApiKeyMeta({ configured: false, prefix: null, createdAt: null });
-      setApiKeyMsg('API key revoked.');
-    } catch (err) {
-      setApiKeyErr(err.message || 'Could not revoke API key.');
-    } finally {
-      setApiKeyBusy(false);
-    }
-  };
-
-  const generateBearerToken = async () => {
-    setBearerTokenBusy(true);
-    setBearerTokenErr('');
-    setBearerTokenMsg('');
-    try {
-      const data = await api.post('/api/auth/bearer-token', {});
-      setBearerToken(data.token || '');
-      setBearerTokenMsg('Bearer token regenerated. Existing integrations must be updated.');
-    } catch (err) {
-      setBearerTokenErr(err.message || 'Could not generate bearer token.');
-    } finally {
-      setBearerTokenBusy(false);
-    }
-  };
-
-  const copyBearerToken = async () => {
-    setBearerTokenErr('');
-    setBearerTokenMsg('');
-    if (!bearerToken) {
-      setBearerTokenErr('Generate a bearer token first.');
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(bearerToken);
-      setBearerTokenMsg('Bearer token copied. Use it in the Authorization: Bearer header.');
-    } catch {
-      setBearerTokenErr('Clipboard blocked — select the token and copy manually (Ctrl+C).');
     }
   };
 
@@ -305,40 +136,25 @@ export default function ProfilePage() {
 
       {isAdmin ? (
         <section className="panel" style={{ marginBottom: '1rem' }}>
-          <h2>Persistent bearer token</h2>
+          <h2>IdentitySphere connector</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            Does not expire and is stored outside the database, so database migrations and reseeding do not invalidate it. It remains the same until you regenerate it. Keep it secret.
+            Loan Hub uses a <strong>static bearer token</strong> from{' '}
+            <code>API_BEARER_TOKEN</code> in <code>backend/.env</code> — the same model as
+            Wisbility HRMS. No regenerating API keys or session JWTs for provisioning.
           </p>
-          {bearerTokenErr ? <div className="alert error">{bearerTokenErr}</div> : null}
-          {bearerTokenMsg ? <div className="alert ok">{bearerTokenMsg}</div> : null}
-          <label htmlFor="persistentBearerToken">Bearer token</label>
-          <textarea
-            id="persistentBearerToken"
-            readOnly
-            rows={3}
-            placeholder="Click Generate bearer token"
-            value={bearerToken}
-            style={{
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-              wordBreak: 'break-all',
-            }}
-          />
-          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
-            <button type="button" className="btn primary" onClick={generateBearerToken} disabled={bearerTokenBusy}>
-              {bearerTokenBusy ? 'Working…' : bearerToken ? 'Regenerate bearer token' : 'Generate bearer token'}
-            </button>
-            <button type="button" className="btn ghost" onClick={copyBearerToken} disabled={!bearerToken}>
-              Copy bearer token
-            </button>
-          </div>
+          <p>
+            <Link to="/settings">Open Settings</Link> to copy the static bearer and connector
+            field values for IdentitySphere App Registry.
+          </p>
         </section>
       ) : null}
 
       {isAdmin ? (
         <section className="panel" style={{ marginBottom: '1rem' }}>
-          <h2>REST API access token</h2>
+          <h2>UI session token</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            Session JWT (expires). Prefer the API key below for IdentitySphere.
+            Session JWT for this browser login only. It expires. Do <strong>not</strong> paste it
+            into IdentitySphere.
           </p>
           {tokenErr ? <div className="alert error">{tokenErr}</div> : null}
           {tokenMsg ? <div className="alert ok">{tokenMsg}</div> : null}
@@ -346,7 +162,7 @@ export default function ProfilePage() {
           <textarea
             id="apiAccessToken"
             readOnly
-            rows={4}
+            rows={3}
             value={showToken ? apiToken : apiToken ? '•'.repeat(Math.min(apiToken.length, 64)) : ''}
             style={{
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
@@ -354,7 +170,7 @@ export default function ProfilePage() {
             }}
           />
           <div className="form-actions" style={{ marginTop: '0.75rem' }}>
-            <button type="button" className="btn primary" onClick={copyToken} disabled={!apiToken}>
+            <button type="button" className="btn ghost" onClick={copyToken} disabled={!apiToken}>
               Copy token
             </button>
             <button
@@ -372,98 +188,16 @@ export default function ProfilePage() {
         </section>
       ) : null}
 
-      {isAdmin ? (
-        <section className="panel" style={{ marginBottom: '1rem' }}>
-          <h2>REST API key</h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Long-lived key for IdentitySphere. Paste into the Bearer token field (or use{' '}
-            <code>X-API-Key</code>). Does not expire until you revoke or regenerate it.
-          </p>
-          {apiKeyErr ? <div className="alert error">{apiKeyErr}</div> : null}
-          {apiKeyMsg ? <div className="alert ok">{apiKeyMsg}</div> : null}
-          <dl className="detail-list" style={{ marginBottom: '0.75rem' }}>
-            <div>
-              <dt>Status</dt>
-              <dd>{apiKeyMeta.configured ? 'Configured' : 'Not created'}</dd>
-            </div>
-            <div>
-              <dt>Prefix</dt>
-              <dd>
-                <code>{apiKeyMeta.prefix || '—'}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Created</dt>
-              <dd>
-                {apiKeyMeta.createdAt
-                  ? new Date(apiKeyMeta.createdAt).toLocaleString()
-                  : '—'}
-              </dd>
-            </div>
-          </dl>
-          <label htmlFor="restApiKey">API key</label>
-          <textarea
-            id="restApiKey"
-            readOnly
-            rows={3}
-            placeholder={
-              apiKeyMeta.configured && !apiKeyValue
-                ? 'This older key cannot be recovered. Regenerate it once to store a value you can show or copy later.'
-                : 'Click Generate API key'
-            }
-            value={
-              showApiKey
-                ? apiKeyValue
-                : apiKeyValue
-                  ? '•'.repeat(Math.min(apiKeyValue.length, 48))
-                  : ''
-            }
-            style={{
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-              wordBreak: 'break-all',
-            }}
-          />
-          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
-            <button type="button" className="btn primary" onClick={generateApiKey} disabled={apiKeyBusy}>
-              {apiKeyBusy ? 'Working…' : apiKeyMeta.configured ? 'Regenerate API key' : 'Generate API key'}
-            </button>
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={copyApiKey}
-            >
-              Copy API key
-            </button>
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={toggleShowApiKey}
-            >
-              {showApiKey ? 'Hide' : 'Show'}
-            </button>
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={revokeApiKey}
-              disabled={apiKeyBusy || !apiKeyMeta.configured}
-            >
-              Revoke
-            </button>
-          </div>
-        </section>
-      ) : null}
-
       <section className="panel">
         <h2>Change password</h2>
         {error ? <div className="alert error">{error}</div> : null}
         {message ? <div className="alert ok">{message}</div> : null}
-        <form className="form-stack" onSubmit={changePassword}>
+        <form onSubmit={changePassword} className="form-grid">
           <label htmlFor="currentPassword">Current password</label>
           <PasswordInput
             id="currentPassword"
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
-            autoComplete="current-password"
             required
           />
           <label htmlFor="newPassword">New password</label>
@@ -471,12 +205,10 @@ export default function ProfilePage() {
             id="newPassword"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            minLength={4}
-            autoComplete="new-password"
             required
           />
           <div className="form-actions">
-            <button className="btn primary" type="submit">
+            <button type="submit" className="btn primary">
               Update password
             </button>
           </div>

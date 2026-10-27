@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const { disconnectAll } = require("./prisma");
+const { disconnectAll, warmPool } = require("./prisma");
 
 const authRoutes = require("./routes/auth");
 const usersRoutes = require("./routes/users");
@@ -68,6 +68,7 @@ app.use(require("./middleware/compression").compression);
 
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/settings", require("./routes/settings"));
 app.use("/api/dashboard", require("./routes/dashboard"));
 app.use("/api/users", usersRoutes);
 app.use("/api/roles", rolesRoutes);
@@ -154,6 +155,8 @@ async function start() {
   }
 
   bindSignals();
+
+  await warmPool();
 
   server = app.listen(PORT, HOST, () => {
     console.log(`Wisibility Loan Hub API listening on ${HOST}:${PORT}`);

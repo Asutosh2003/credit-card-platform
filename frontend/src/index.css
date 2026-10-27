@@ -218,6 +218,63 @@ code {
   box-shadow: var(--shadow);
 }
 
+.settings-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+@media (min-width: 960px) {
+  .settings-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.settings-panel-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 0.85rem 0 1rem;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-row:last-child {
+  border-bottom: none;
+}
+
+.settings-row code {
+  font-size: 0.85rem;
+  word-break: break-all;
+  text-align: right;
+}
+
+.badge {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.badge.ok {
+  border-color: color-mix(in srgb, var(--ok, #3d9a6a) 50%, var(--line));
+  color: var(--ok, #3d9a6a);
+}
+
 .panel h2 {
   display: flex;
   align-items: center;

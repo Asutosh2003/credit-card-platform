@@ -8,6 +8,26 @@ const {
   buildUserIdFromNames,
 } = require("./userAttributes");
 
+/** bcrypt cost for provisioned accounts — 4 is enough for demo/connector traffic. */
+const PROVISION_BCRYPT_ROUNDS = Math.min(
+  10,
+  Math.max(4, Number(process.env.PROVISION_BCRYPT_ROUNDS || 4) || 4)
+);
+
+/** Reuse hash when every joiner gets PROVISION_DEFAULT_PASSWORD (bulk path). */
+const passwordHashCache = new Map();
+
+async function hashPassword(password) {
+  const key = `${PROVISION_BCRYPT_ROUNDS}:${password}`;
+  const hit = passwordHashCache.get(key);
+  if (hit) return hit;
+  const hash = await bcrypt.hash(password, PROVISION_BCRYPT_ROUNDS);
+  // Cap cache — only the default provision password is reused heavily.
+  if (passwordHashCache.size > 8) passwordHashCache.clear();
+  passwordHashCache.set(key, hash);
+  return hash;
+}
+
 async function assertPrimaryKeyUnique(attributes, fields, excludeUserId) {
   const pkField = fields.find((f) => f.isPrimaryKey);
   if (!pkField) return null;
@@ -42,13 +62,13 @@ async function applyUserPayload(
     if (!password || typeof password !== "string" || password.length < 4) {
       errors.push("password is required (min 4 characters)");
     } else {
-      data.passwordHash = await bcrypt.hash(password, 8);
+      data.passwordHash = await hashPassword(password);
     }
   } else if (password) {
     if (typeof password !== "string" || password.length < 4) {
       errors.push("password must be at least 4 characters");
     } else {
-      data.passwordHash = await bcrypt.hash(password, 8);
+      data.passwordHash = await hashPassword(password);
     }
   }
 

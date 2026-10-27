@@ -254,60 +254,22 @@ router.post("/", requireAdmin, async (req, res) => {
     const joiner = await normalizeJoinerBody(req.body);
     const tentativeLogin = tentativeLoginFromJoiner(joiner);
     const viaApiKey = req.auth?.via === "api_key";
-    let existingEarly = null;
 
-    if (tentativeLogin) {
-      existingEarly = await prisma.user.findUnique({
-        where: { userId: tentativeLogin },
-        include: userInclude,
-      });
-      if (existingEarly && !viaApiKey) {
-        return res.status(200).json({
-          user: publicUser(existingEarly),
-          userListItem: publicUserListItem(existingEarly),
-          provisionStatus: "already_exists",
-          message: "User already exists in Loan Hub",
-        });
-      }
+    // skipDuplicateCheck: unique index + P2002 handles races; avoids an extra
+    // Supabase SELECT (~130–200ms) on every Joiner create.
+    const { errors, data } = await applyUserPayload(joiner, {
+      isCreate: true,
+      skipDuplicateCheck: true,
+    });
+    if (errors.length) {
+      return res.status(400).json({ error: errors.join("; ") });
     }
 
     if (viaApiKey) {
-      if (!tentativeLogin) {
+      if (!tentativeLogin && !data.userId) {
         return res.status(400).json({
           error: "User ID is required — send user_id (or userId) or first_name + last_name",
         });
-      }
-
-      if (existingEarly) {
-        const appliedResult = buildProvisionResult(joiner, existingEarly);
-        const request = await prisma.provisionRequest.create({
-          data: {
-            targetUserLogin: existingEarly.userId,
-            payload: joiner,
-            rawPayload: req.body || {},
-            appliedResult,
-            requestedByUserId: req.user.id,
-            source: "identitysphere",
-            status: "approved",
-            createdUserId: existingEarly.id,
-            reviewedByUserId: req.user.id,
-            reviewedAt: new Date(),
-          },
-        });
-
-        return res.status(200).json({
-          user: publicUser(existingEarly),
-          userListItem: publicUserListItem(existingEarly),
-          requestId: request.id,
-          provisionStatus: "already_exists",
-          message: "Provision request received; requested values were already present or were not applied",
-          appliedResult,
-        });
-      }
-
-      const { errors, data } = await applyUserPayload(joiner, { isCreate: true });
-      if (errors.length) {
-        return res.status(400).json({ error: errors.join("; ") });
       }
 
       const { user, missingRoleCodes } = await createUserFromJoiner(joiner, data);
@@ -316,23 +278,29 @@ router.post("/", requireAdmin, async (req, res) => {
         missingRoleCodes,
       });
 
-      const request = await prisma.provisionRequest.create({
-        data: {
-          targetUserLogin: user.userId,
-          payload: joiner,
-          rawPayload: req.body || {},
-          appliedResult,
-          requestedByUserId: req.user.id,
-          source: "identitysphere",
-          status: "approved",
-          createdUserId: user.id,
-          reviewedByUserId: req.user.id,
-          reviewedAt: new Date(),
-        },
-      });
+      // Fire-and-forget history — IdentitySphere only needs user.id in the body.
+      // Static env bearer has no DB user id; skip FK insert in that case.
+      if (req.user?.id) {
+        prisma.provisionRequest
+          .create({
+            data: {
+              targetUserLogin: user.userId,
+              payload: joiner,
+              rawPayload: req.body || {},
+              appliedResult,
+              requestedByUserId: req.user.id,
+              source: "identitysphere",
+              status: "approved",
+              createdUserId: user.id,
+              reviewedByUserId: req.user.id,
+              reviewedAt: new Date(),
+            },
+          })
+          .catch((err) => console.error("Failed to record provision request", err));
+      }
 
       writeAudit({
-        actorUserId: req.user.id,
+        actorUserId: req.user?.id || null,
         action: "provision_user",
         entityType: "user",
         entityId: user.id,
@@ -341,7 +309,6 @@ router.post("/", requireAdmin, async (req, res) => {
           roleCodes: joiner.roleCodes,
           missingRoleCodes,
           via: "api_key",
-          requestId: request.id,
           autoAccepted: true,
         },
       });
@@ -349,17 +316,11 @@ router.post("/", requireAdmin, async (req, res) => {
       return res.status(201).json({
         user: publicUser(user),
         userListItem: publicUserListItem(user),
-        requestId: request.id,
         provisionStatus: "created",
         message: "User provisioned successfully",
         appliedResult,
         missingRoleCodes: missingRoleCodes.length ? missingRoleCodes : undefined,
       });
-    }
-
-    const { errors, data } = await applyUserPayload(joiner, { isCreate: true });
-    if (errors.length) {
-      return res.status(400).json({ error: errors.join("; ") });
     }
 
     const { user, missingRoleCodes } = await createUserFromJoiner(joiner, data);
@@ -385,17 +346,45 @@ router.post("/", requireAdmin, async (req, res) => {
     });
   } catch (err) {
     if (err.code === "P2002") {
-      const login = req.body?.userId || req.body?.user_id || req.body?.attributes?.user_id;
+      const login =
+        req.body?.userId ||
+        req.body?.user_id ||
+        req.body?.attributes?.user_id ||
+        req.body?.username;
       if (login) {
         const existing = await prisma.user.findUnique({
           where: { userId: String(login) },
           include: userInclude,
         });
         if (existing) {
+          const viaApiKey = req.auth?.via === "api_key";
+          if (viaApiKey) {
+            // Record duplicate joiners without blocking the response body shape.
+            prisma.provisionRequest
+              .create({
+                data: {
+                  targetUserLogin: existing.userId,
+                  payload: req.body || {},
+                  rawPayload: req.body || {},
+                  appliedResult: buildProvisionResult(
+                    { attributes: existing.attributes || {}, roleCodes: [] },
+                    existing
+                  ),
+                  requestedByUserId: req.user.id,
+                  source: "identitysphere",
+                  status: "approved",
+                  createdUserId: existing.id,
+                  reviewedByUserId: req.user.id,
+                  reviewedAt: new Date(),
+                },
+              })
+              .catch((e) => console.error("Failed to record duplicate provision", e));
+          }
           return res.status(200).json({
             user: publicUser(existing),
             userListItem: publicUserListItem(existing),
             provisionStatus: "already_exists",
+            message: "User already exists in Loan Hub",
           });
         }
       }

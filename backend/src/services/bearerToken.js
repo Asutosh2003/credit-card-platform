@@ -1,56 +1,46 @@
 const crypto = require("crypto");
-const fs = require("fs/promises");
-const path = require("path");
 
-const BEARER_TOKEN_PREFIX = "wlh_bearer_";
-const TOKEN_FILE =
-  process.env.API_BEARER_TOKEN_FILE ||
-  path.join(__dirname, "..", "..", ".secrets", "api-bearer-token");
-
-async function readBearerToken() {
-  try {
-    const token = (await fs.readFile(TOKEN_FILE, "utf8")).trim();
-    return token || null;
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw err;
-  }
+/**
+ * HRMS-compatible IdentitySphere auth: one static bearer from API_BEARER_TOKEN
+ * in backend/.env. No regenerate/revoke cycle, no DB-stored secrets, no JWT.
+ */
+function getEnvBearerToken() {
+  return String(process.env.API_BEARER_TOKEN || "").trim() || null;
 }
 
-async function generateBearerToken() {
-  const token = `${BEARER_TOKEN_PREFIX}${crypto.randomBytes(32).toString("base64url")}`;
-  const directory = path.dirname(TOKEN_FILE);
-  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  const temporaryFile = `${TOKEN_FILE}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`;
-  try {
-    await fs.writeFile(temporaryFile, `${token}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    await fs.rename(temporaryFile, TOKEN_FILE);
-  } catch (err) {
-    try {
-      await fs.unlink(temporaryFile);
-    } catch (cleanupError) {
-      if (cleanupError.code !== "ENOENT") {
-        console.error("Failed to remove temporary bearer token file:", cleanupError);
-      }
-    }
-    throw err;
-  }
-  return token;
+function isEnvBearerConfigured() {
+  return Boolean(getEnvBearerToken());
+}
+
+async function readBearerToken() {
+  return getEnvBearerToken();
 }
 
 function isBearerTokenToken(token) {
-  return typeof token === "string" && token.startsWith(BEARER_TOKEN_PREFIX);
+  if (typeof token !== "string" || !token) return false;
+  const env = getEnvBearerToken();
+  return Boolean(env) && token === env;
 }
 
 async function matchesBearerToken(token) {
-  const storedToken = await readBearerToken();
-  if (!storedToken || !isBearerTokenToken(token)) return false;
-  const suppliedHash = crypto.createHash("sha256").update(token).digest();
-  const storedHash = crypto.createHash("sha256").update(storedToken).digest();
-  return crypto.timingSafeEqual(suppliedHash, storedHash);
+  const stored = getEnvBearerToken();
+  if (!stored || typeof token !== "string" || !token) return false;
+  const a = Buffer.from(token);
+  const b = Buffer.from(stored);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/** @deprecated File-backed regenerate removed — configure API_BEARER_TOKEN instead. */
+async function generateBearerToken() {
+  throw new Error(
+    "Static bearer only: set API_BEARER_TOKEN in backend/.env (same pattern as Wisbility HRMS) and restart. Do not generate or regenerate connector tokens."
+  );
 }
 
 module.exports = {
+  getEnvBearerToken,
+  isEnvBearerConfigured,
   readBearerToken,
   generateBearerToken,
   isBearerTokenToken,
